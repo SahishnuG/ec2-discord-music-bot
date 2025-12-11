@@ -19,7 +19,4 @@ COPY bot.py ./
 RUN useradd -m botuser
 USER botuser
 
-# Environment variable placeholder (override at runtime)
-ENV DISCORD_TOKEN=""
-
 CMD ["python", "bot.py"]
