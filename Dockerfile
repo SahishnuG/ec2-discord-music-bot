@@ -20,6 +20,6 @@ RUN useradd -m botuser
 USER botuser
 
 # Environment variable placeholder (override at runtime)
-ENV DISCORD_TOKEN="ODM3OTMwNzMwMTcxNTMxMjg0.GsD2IG.Hu2BaNvZJ6IJ-yT7drqnC7qChY1_bFTkAWBzns"
+ENV DISCORD_TOKEN=""
 
 CMD ["python", "bot.py"]
