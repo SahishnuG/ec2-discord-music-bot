@@ -11,10 +11,12 @@ from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 from langchain_core.runnables import RunnableConfig
 import os
+import json
 from dotenv import load_dotenv
 import httpx
 import uvicorn
 
+from langfuse import Langfuse
 from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
@@ -64,16 +66,31 @@ SUMMARIZER_MODEL = "gemma3:4b"    # can be same or different; no tools bound her
 
 router_llm = ChatOllama(model=ROUTER_MODEL, temperature=0.2).bind_tools([get_weather])
 summarizer_llm = ChatOllama(model=SUMMARIZER_MODEL, temperature=0.2)
+insecure_client = httpx.Client(verify=False)
+langfuse = Langfuse(host=os.getenv("LANGFUSE_HOST"),
+                    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+                    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+                    httpx_client=insecure_client
+                    )
+with open(".env", mode="a", encoding="utf-8") as env:
+    user_expert_prompt = langfuse.get_prompt(name="router", type="chat").prompt #label="production" by defualt
+    print(user_expert_prompt)
+    content = json.dumps(user_expert_prompt[0]["content"])
+    user_expert_prompt = f"\nROUTER_SYSTEM_PROMPT={content}\n"
+    env.write(user_expert_prompt)
 
+    user_expert_prompt = langfuse.get_prompt(
+        name="summariser", type="chat").prompt
+    content = json.dumps(user_expert_prompt[0]["content"])
+    user_expert_prompt = f"\nSUMMARISER_SYSTEM_PROMPT={content}\n"
+    env.write(user_expert_prompt)
+load_dotenv() #load env again after updating
 # Optional system prompts to make behavior crisp
 ROUTER_SYSTEM = SystemMessage(content=(
-    "You are a routing assistant. "
-    "When a user asks for something that requires a tool, emit a tool call. "
-    "If a tool is not needed, respond normally."
+    os.getenv("ROUTER_SYSTEM_PROMPT")
 ))
 SUMMARIZER_SYSTEM = SystemMessage(content=(
-    "You are a summarizer. Read the user's question and the latest tool results, "
-    "and produce a clear, concise final answer."
+    os.getenv("SUMMARISER_SYSTEM_PROMPT")
 ))
 
 # --------- Define the Router node ----------
