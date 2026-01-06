@@ -1,5 +1,4 @@
-
-# filename: weather_langgraph_api.py
+# filename: api.py
 from typing import Annotated, List, TypedDict, Optional, Dict, Any
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -7,21 +6,17 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt import ToolNode
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, BaseMessage, SystemMessage
-from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 from langchain_core.runnables import RunnableConfig
-import os
 import json
-from dotenv import load_dotenv
-import httpx
 import uvicorn
-
-from langfuse import Langfuse
 from fastapi.middleware.cors import CORSMiddleware
+from langfuse import Langfuse
 
-load_dotenv()
-api_key = os.getenv('WEATHER_API_KEY')
+from src.tools import get_weather
+from config.settings import Settings
 
+settings = Settings()
 # --------- Define a simple conversational state ----------
 class ConversationState(TypedDict):
     messages: Annotated[List[BaseMessage], "Chat history as a list of messages"]
@@ -38,26 +33,6 @@ def _format_context(messages, k=3):
         lines.append(f"{role}: {content}")
     return "\n".join(lines)
 
-# --------- Define a custom tool ----------
-@tool
-def get_weather(city: str) -> str:
-    """Return a real weather report for a given city."""
-    real_time_url = "https://api.tomorrow.io/v4/weather/realtime"
-
-    print("Fetching real-time data for location: ", city)
-    try:
-        with httpx.Client(base_url=real_time_url, timeout=100) as client:
-            response = client.get(
-                real_time_url,
-                params={"location": city, "apikey": api_key}
-            )
-            if response.status_code != 200:
-                print("Failed to fetch real-time data: ", response.text)
-                return False, {"error": response.text}
-            return True, response.json()
-    except Exception as e:
-        print("Unexpected error while fetching real-time data: ", e)
-        return False, {"error": str(e)}
 
 # --------- Create the Ollama LLMs ----------
 # IMPORTANT: Pick a router model that supports tool/function calling in Ollama.
@@ -66,32 +41,15 @@ SUMMARIZER_MODEL = "gemma3:4b"    # can be same or different; no tools bound her
 
 router_llm = ChatOllama(model=ROUTER_MODEL, temperature=0.2).bind_tools([get_weather])
 summarizer_llm = ChatOllama(model=SUMMARIZER_MODEL, temperature=0.2)
-insecure_client = httpx.Client(verify=False)
-langfuse = Langfuse(host=os.getenv("LANGFUSE_HOST"),
-                    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-                    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-                    httpx_client=insecure_client
-                    )
-with open(".env", mode="a", encoding="utf-8") as env:
-    user_expert_prompt = langfuse.get_prompt(name="router", type="chat").prompt #label="production" by defualt
-    print(user_expert_prompt)
-    content = json.dumps(user_expert_prompt[0]["content"])
-    user_expert_prompt = f"\nROUTER_SYSTEM_PROMPT={content}\n"
-    env.write(user_expert_prompt)
 
-    user_expert_prompt = langfuse.get_prompt(
-        name="summariser", type="chat").prompt
-    content = json.dumps(user_expert_prompt[0]["content"])
-    user_expert_prompt = f"\nSUMMARISER_SYSTEM_PROMPT={content}\n"
-    env.write(user_expert_prompt)
-load_dotenv() #load env again after updating
 # Optional system prompts to make behavior crisp
 ROUTER_SYSTEM = SystemMessage(content=(
-    os.getenv("ROUTER_SYSTEM_PROMPT")
+    json.loads(settings.router_system)
 ))
 SUMMARIZER_SYSTEM = SystemMessage(content=(
-    os.getenv("SUMMARISER_SYSTEM_PROMPT")
+    json.loads(settings.summariser_system)
 ))
+
 
 # --------- Define the Router node ----------
 def router_node(state: ConversationState, config: RunnableConfig = None) -> ConversationState:
@@ -250,5 +208,34 @@ def generate(req: GenerateRequest):
 
     return GenerateResponse(assistant_reply=assistant_reply, events=events_out or None)
 
-if __name__ == "__main__":
-    uvicorn.run("api:api", host="0.0.0.0", port=8000, reload=True)
+
+import uuid
+
+initial_trace_id = str(uuid.uuid4())  # Unique ID for the entire request
+
+langfuse = Langfuse()
+
+trace = langfuse.trace(
+    name="FastAPI Server Initialization",
+    trace_id=initial_trace_id
+)
+
+initial_span_id=langfuse.span(
+            name="Initializing FastAPI Server",
+            trace_id=initial_trace_id
+        ).id
+
+def serve(host="0.0.0.0", port=8000):
+    """
+    Starts the FastAPI application using Uvicorn server.
+    Args:
+        host (str): The host address to bind the server to.
+        port (int): The port number to listen on.
+    """
+    uvicorn_event = langfuse.event(
+        name="Start Uvicorn Server",
+        trace_id=initial_trace_id,
+        parent_observation_id=initial_span_id
+    )
+    uvicorn.run("src.api:api", host=host, port=port)
+    uvicorn_event.end()
