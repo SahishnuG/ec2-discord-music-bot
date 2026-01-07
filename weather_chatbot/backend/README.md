@@ -16,3 +16,6 @@ system msg: You are a summarizer. Read the user's question and the latest tool r
 and produce a clear, concise final answer.
 
 set production label
+
+# run
+uv run main.py

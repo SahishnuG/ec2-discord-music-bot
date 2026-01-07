@@ -12,6 +12,7 @@ import json
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 from langfuse import Langfuse
+import httpx
 
 from src.tools import get_weather
 from config.settings import Settings
@@ -208,17 +209,16 @@ def generate(req: GenerateRequest):
 
     return GenerateResponse(assistant_reply=assistant_reply, events=events_out or None)
 
-
-import uuid
-
-initial_trace_id = str(uuid.uuid4())  # Unique ID for the entire request
-
-langfuse = Langfuse()
+insecure_client = httpx.Client(verify=False)
+langfuse = Langfuse(host=settings.langfuse_host,
+    public_key=settings.langfuse_public_key,
+    secret_key=settings.langfuse_secret_key,
+    httpx_client=insecure_client)
 
 trace = langfuse.trace(
     name="FastAPI Server Initialization",
-    trace_id=initial_trace_id
 )
+initial_trace_id = trace.id
 
 initial_span_id=langfuse.span(
             name="Initializing FastAPI Server",
@@ -237,5 +237,7 @@ def serve(host="0.0.0.0", port=8000):
         trace_id=initial_trace_id,
         parent_observation_id=initial_span_id
     )
-    uvicorn.run("src.api:api", host=host, port=port)
+    uvicorn.run("src.api:api", host=host, port=port) #src.api as it is called from backend root
     uvicorn_event.end()
+    langfuse.flush()  # important for short-lived apps
+    print("DONE. Trace ID:", trace.id)

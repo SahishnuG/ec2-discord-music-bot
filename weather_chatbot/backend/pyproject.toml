@@ -27,7 +27,6 @@ dependencies = [
     # Data models (FastAPI uses Pydantic v2)
     "pydantic>=2.5.0",
 
-    # Optional: if you actually need PyTorch; otherwise remove
     "langfuse<3.0.0"
 ]
 

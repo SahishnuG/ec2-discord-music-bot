@@ -1,5 +1,4 @@
 from langchain_core.tools import tool
-import os
 import httpx
 
 from config.settings import Settings
