@@ -45,4 +45,5 @@ class WeatherAgent:
         set_key(self.env, "SUMMARISER_SYSTEM_PROMPT", json.dumps(summariser_sys))
 
 if __name__ == "__main__":
+    WeatherAgent().edit_env()
     serve()
